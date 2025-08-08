@@ -13,12 +13,17 @@
     .negativo { color: #a00;}
     .positivo { color: #295c29;}
     .tableMini td { padding-right: 10px;}
+    .btn { padding: 2px 8px; margin-left: 5px; border: none; border-radius: 4px; cursor: pointer;}
+    .btnEdit { background: #ffd000; }
+    .btnDel { background: #f66; color: #fff; }
+    .editando { background: #fff4c2; }
   </style>
 </head>
 <body>
 
   <h2>Entradas</h2>
   <form id="formEntrada" class="form-section">
+    <input type="hidden" id="entradaIdEdit">
     <label>Categoria:
       <select id="entradaCategoria">
         <option>Estácio</option>
@@ -39,11 +44,13 @@
     <label>Data:
       <input id="entradaData" type="date" required>
     </label>
-    <button type="submit">Adicionar Entrada</button>
+    <button type="submit">Salvar Entrada</button>
+    <button type="button" id="entradaCancelar" style="display:none">Cancelar Edição</button>
   </form>
 
   <h2>Saídas</h2>
   <form id="formSaida" class="form-section">
+    <input type="hidden" id="saidaIdEdit">
     <label>Categoria:
       <select id="saidaCategoria">
         <option>Cartão</option>
@@ -63,7 +70,8 @@
     <label>Número de Parcelas:
       <input id="saidaParcelas" type="number" min="1" max="36" value="1">
     </label>
-    <button type="submit">Adicionar Saída</button>
+    <button type="submit">Salvar Saída</button>
+    <button type="button" id="saidaCancelar" style="display:none">Cancelar Edição</button>
   </form>
 
   <h2>Balanço Mensal</h2>
@@ -75,48 +83,117 @@
   </div>
 
 <script>
-  // Arvore de dados principais
-  const entradas = [];
-  const saidas = [];
-  // Setar mês atual por padrão
+  // Funções para armazenamento em LocalStorage
+  function carregarDados(chave) {
+    return JSON.parse(localStorage.getItem(chave) || "[]");
+  }
+  function salvarDados(chave, arr) {
+    localStorage.setItem(chave, JSON.stringify(arr));
+  }
+
+  // Carregar dados salvos (ou vazio se não tiver)
+  let entradas = carregarDados('entradas');
+  let saidas = carregarDados('saidas');
+
+  // ID incremental para lançamentos
+  let nextId = Math.max(
+    0,
+    ...entradas.map(e=>e.id||0),
+    ...saidas.map(s=>s.idOrigem||0)
+  ) + 1;
+
+  // Data atual como padrão
   const now = new Date();
   document.getElementById('mesSelect').value = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
 
-  // Adicionar entrada
+  // === ENTRADAS ===
   document.getElementById('formEntrada').onsubmit = function(e) {
     e.preventDefault();
-    entradas.push({
+    const idEdit = document.getElementById('entradaIdEdit').value;
+    const novaEntrada = {
+      id: idEdit ? +idEdit : nextId++,
       categoria: document.getElementById('entradaCategoria').value,
       valor: parseFloat(document.getElementById('entradaValor').value),
       data: document.getElementById('entradaData').value
-    });
+    };
+    if (idEdit) {
+      // Editar
+      const idx = entradas.findIndex(x => x.id == idEdit);
+      if (idx >= 0) entradas[idx] = novaEntrada;
+    } else {
+      // Nova
+      entradas.push(novaEntrada);
+    }
+    salvarDados('entradas', entradas);
     this.reset();
+    document.getElementById('entradaIdEdit').value = '';
+    document.getElementById('entradaCancelar').style.display = 'none';
     atualizarBalanco();
   };
 
-  // Adicionar saída (com controle de parcelas)
+  document.getElementById('entradaCancelar').onclick = function() {
+    document.getElementById('formEntrada').reset();
+    document.getElementById('entradaIdEdit').value = '';
+    this.style.display = 'none';
+  };
+
+  // === SAÍDAS ===
   document.getElementById('formSaida').onsubmit = function(e) {
     e.preventDefault();
-    const qtdParcelas = Math.max(1, parseInt(document.getElementById('saidaParcelas').value) || 1);
-    const valorTotal = parseFloat(document.getElementById('saidaValor').value);
-    const valorParcela = parseFloat((valorTotal / qtdParcelas).toFixed(2));
-    const dataInicial = new Date(document.getElementById('saidaData').value);
-    for(let i=0; i<qtdParcelas; i++){
-      const dataParcela = new Date(dataInicial);
-      dataParcela.setMonth(dataParcela.getMonth()+i);
-      saidas.push({
-        categoria: document.getElementById('saidaCategoria').value,
-        descricao: document.getElementById('saidaDescricao').value,
-        valor: valorParcela,
-        data: dataParcela.toISOString().slice(0,10)
-      });
+    const idEdit = document.getElementById('saidaIdEdit').value;
+    if (idEdit) {
+      // Edição, só muda 1 parcela (não altera as demais)
+      const idx = saidas.findIndex(x => x.id == idEdit);
+      if (idx >= 0) {
+        saidas[idx].categoria = document.getElementById('saidaCategoria').value;
+        saidas[idx].descricao = document.getElementById('saidaDescricao').value;
+        saidas[idx].valor = parseFloat(document.getElementById('saidaValor').value);
+        saidas[idx].data = document.getElementById('saidaData').value;
+        saidas[idx].parcela = 1;
+        saidas[idx].totalParcelas = 1;
+        salvarDados('saidas', saidas);
+      }
+    } else {
+      // Nova saída, pode ser parcelada
+      const qtdParcelas = Math.max(1, parseInt(document.getElementById('saidaParcelas').value) || 1);
+      const valorTotal = parseFloat(document.getElementById('saidaValor').value);
+      const valorParcela = parseFloat((valorTotal / qtdParcelas).toFixed(2));
+      const dataInicial = new Date(document.getElementById('saidaData').value);
+
+      const idOrigem = nextId++;
+      for(let i=0; i<qtdParcelas; i++){
+        const dataParcela = new Date(dataInicial);
+        dataParcela.setMonth(dataParcela.getMonth()+i);
+        saidas.push({
+          id: nextId++, // Unico por parcela
+          idOrigem,     // ID para grupo
+          categoria: document.getElementById('saidaCategoria').value,
+          descricao: document.getElementById('saidaDescricao').value,
+          valor: valorParcela,
+          data: dataParcela.toISOString().slice(0,10),
+          parcela: i+1,
+          totalParcelas: qtdParcelas,
+        });
+      }
+      salvarDados('saidas', saidas);
     }
     this.reset();
+    document.getElementById('saidaIdEdit').value = '';
+    document.getElementById('saidaCancelar').style.display = 'none';
     atualizarBalanco();
   };
 
-  // Atualizar Balanço
+  document.getElementById('saidaCancelar').onclick = function() {
+    document.getElementById('formSaida').reset();
+    document.getElementById('saidaIdEdit').value = '';
+    this.style.display = 'none';
+  };
+
+  // Atualizar Balanço e montar tabelas com botões de Editar/Excluir
   function atualizarBalanco() {
+    salvarDados('entradas', entradas);
+    salvarDados('saidas', saidas);
+
     const mesSelecionado = document.getElementById('mesSelect').value; // yyyy-mm
     // Filtrar entradas e saidas do mês
     const entradasMes = entradas.filter(e => e.data.slice(0,7) === mesSelecionado);
@@ -127,7 +204,14 @@
     html += "<b>Entradas:</b> <table class='tableMini'>";
     let totalE = 0;
     for(let e of entradasMes){
-      html += `<tr><td>${e.categoria}</td><td>${formatarData(e.data)}</td><td>R$ ${e.valor.toFixed(2)}</td></tr>`;
+      html += `<tr${(document.getElementById('entradaIdEdit').value == e.id) ? " class='editando'" : ""}>
+      <td>${e.categoria}</td>
+      <td>${formatarData(e.data)}</td>
+      <td>R$ ${e.valor.toFixed(2)}</td>
+      <td>
+        <button class='btn btnEdit' onclick='editarEntrada(${e.id})'>✎</button>
+        <button class='btn btnDel' onclick='deletarEntrada(${e.id})'>✗</button>
+      </td></tr>`;
       totalE += e.valor;
     }
     html += `</table>Total: <b>R$ ${totalE.toFixed(2)}</b>`;
@@ -136,7 +220,14 @@
     html += "<br><b>Saídas:</b> <table class='tableMini'>";
     let totalS = 0;
     for(let s of saidasMes){
-      html += `<tr><td>${s.categoria}/${s.descricao}</td><td>${formatarData(s.data)}</td><td>R$ ${s.valor.toFixed(2)}</td></tr>`;
+      html += `<tr${(document.getElementById('saidaIdEdit').value == s.id) ? " class='editando'" : ""}>
+      <td>${s.categoria}/${s.descricao}</td>
+      <td>${formatarData(s.data)}${s.totalParcelas > 1 ? ` (${s.parcela}/${s.totalParcelas})`:''}</td>
+      <td>R$ ${s.valor.toFixed(2)}</td>
+      <td>
+        <button class='btn btnEdit' onclick='editarSaida(${s.id})'>✎</button>
+        <button class='btn btnDel' onclick='deletarSaida(${s.id})'>✗</button>
+      </td></tr>`;
       totalS += s.valor;
     }
     html += `</table>Total: <b>R$ ${totalS.toFixed(2)}</b>`;
@@ -147,12 +238,64 @@
 
     document.getElementById('balanco').innerHTML = html;
   }
+
+  // Funções de editar/deletar lançamento - exposição no window para funcionar no onclick
+  window.editarEntrada = function(id) {
+    const ent = entradas.find(x => x.id==id);
+    if (!ent) return;
+    document.getElementById('entradaCategoria').value = ent.categoria;
+    document.getElementById('entradaValor').value = ent.valor;
+    document.getElementById('entradaData').value = ent.data;
+    document.getElementById('entradaIdEdit').value = ent.id;
+    document.getElementById('entradaCancelar').style.display = '';
+    document.getElementById('entradaCategoria').focus();
+  };
+  window.deletarEntrada = function(id) {
+    if (confirm("Tem certeza que deseja excluir esta entrada?")) {
+      entradas = entradas.filter(x => x.id != id);
+      salvarDados('entradas', entradas);
+      atualizarBalanco();
+    }
+  };
+
+  window.editarSaida = function(id) {
+    const sai = saidas.find(x => x.id==id);
+    if (!sai) return;
+    document.getElementById('saidaCategoria').value = sai.categoria;
+    document.getElementById('saidaDescricao').value = sai.descricao;
+    document.getElementById('saidaValor').value = sai.valor;
+    document.getElementById('saidaData').value = sai.data;
+    document.getElementById('saidaParcelas').value = 1;
+    document.getElementById('saidaIdEdit').value = sai.id;
+    document.getElementById('saidaCancelar').style.display = '';
+    document.getElementById('saidaCategoria').focus();
+  };
+  window.deletarSaida = function(id) {
+    // Remove todas parcelas “irmãs” se for parcela única, ou só uma se for edição
+    const sae = saidas.find(x=>x.id==id);
+    if (!sae) return;
+    let remover = [id];
+    // Se for grupo de parcelas, pergunta se deseja remover todas relacionadas
+    if (sae.totalParcelas > 1) {
+      if (confirm("Deseja remover apenas esta parcela?\n\nClique em 'OK' para remover só esta parcela.\nClique em 'Cancelar' para remover todas as parcelas deste lançamento.")) {
+        // Só esta
+      } else {
+        // Remove todas do mesmo grupo
+        remover = saidas.filter(x => x.idOrigem==sae.idOrigem).map(x=>x.id);
+      }
+    }
+    saidas = saidas.filter(x => !remover.includes(x.id));
+    salvarDados('saidas', saidas);
+    atualizarBalanco();
+  };
+
   function formatarData(dataStr) {
     const [y, m, d] = dataStr.split("-");
     return d+"/"+m;
   }
   document.getElementById('mesSelect').oninput = atualizarBalanco;
-  // Chamar no início
+
+  // Chamar ao iniciar
   atualizarBalanco();
 </script>
 
