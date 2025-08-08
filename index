@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <title>Controle de Finanças</title>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 500px; margin: 25px auto; background: #f8f8f8;}
+    h2 { color: #363; }
+    label { display: block; margin-top: 8px; }
+    input, select { width: 100%; padding: 4px; margin-top: 2px; box-sizing: border-box;}
+    .form-section { background: #fff; padding: 13px; margin-bottom: 18px; border-radius: 7px; box-shadow: 0 1px 6px #eee;}
+    .balanco { background: #e0fbe0; padding: 12px; border-radius: 10px; }
+    .negativo { color: #a00;}
+    .positivo { color: #295c29;}
+    .tableMini td { padding-right: 10px;}
+  </style>
+</head>
+<body>
+
+  <h2>Entradas</h2>
+  <form id="formEntrada" class="form-section">
+    <label>Categoria:
+      <select id="entradaCategoria">
+        <option>Estácio</option>
+        <option>Fungota</option>
+        <option>SC Ribeirão - Ambulatório</option>
+        <option>SC Ribeirão - Emergencia</option>
+        <option>SC Ribeirão - Consultorio</option>
+        <option>SC Ribeirão - Hospital</option>
+        <option>SC Cajuru</option>
+        <option>Uniara</option>
+        <option>Convênios</option>
+        <option>Outros</option>
+      </select>
+    </label>
+    <label>Valor:
+      <input id="entradaValor" type="number" step="0.01" min="0" required>
+    </label>
+    <label>Data:
+      <input id="entradaData" type="date" required>
+    </label>
+    <button type="submit">Adicionar Entrada</button>
+  </form>
+
+  <h2>Saídas</h2>
+  <form id="formSaida" class="form-section">
+    <label>Categoria:
+      <select id="saidaCategoria">
+        <option>Cartão</option>
+        <option>Boleto</option>
+        <option>Débito Aut.</option>
+      </select>
+    </label>
+    <label>Descrição:
+      <input id="saidaDescricao" type="text" maxlength="30" placeholder="Ex: Faculdade/Aluguel" required>
+    </label>
+    <label>Valor:
+      <input id="saidaValor" type="number" step="0.01" min="0" required>
+    </label>
+    <label>Data:
+      <input id="saidaData" type="date" required>
+    </label>
+    <label>Número de Parcelas:
+      <input id="saidaParcelas" type="number" min="1" max="36" value="1">
+    </label>
+    <button type="submit">Adicionar Saída</button>
+  </form>
+
+  <h2>Balanço Mensal</h2>
+  <div class="form-section">
+    <label>Selecione o mês:
+      <input type="month" id="mesSelect" value="">
+    </label>
+    <div id="balanco" class="balanco"></div>
+  </div>
+
+<script>
+  // Arvore de dados principais
+  const entradas = [];
+  const saidas = [];
+  // Setar mês atual por padrão
+  const now = new Date();
+  document.getElementById('mesSelect').value = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+
+  // Adicionar entrada
+  document.getElementById('formEntrada').onsubmit = function(e) {
+    e.preventDefault();
+    entradas.push({
+      categoria: document.getElementById('entradaCategoria').value,
+      valor: parseFloat(document.getElementById('entradaValor').value),
+      data: document.getElementById('entradaData').value
+    });
+    this.reset();
+    atualizarBalanco();
+  };
+
+  // Adicionar saída (com controle de parcelas)
+  document.getElementById('formSaida').onsubmit = function(e) {
+    e.preventDefault();
+    const qtdParcelas = Math.max(1, parseInt(document.getElementById('saidaParcelas').value) || 1);
+    const valorTotal = parseFloat(document.getElementById('saidaValor').value);
+    const valorParcela = parseFloat((valorTotal / qtdParcelas).toFixed(2));
+    const dataInicial = new Date(document.getElementById('saidaData').value);
+    for(let i=0; i<qtdParcelas; i++){
+      const dataParcela = new Date(dataInicial);
+      dataParcela.setMonth(dataParcela.getMonth()+i);
+      saidas.push({
+        categoria: document.getElementById('saidaCategoria').value,
+        descricao: document.getElementById('saidaDescricao').value,
+        valor: valorParcela,
+        data: dataParcela.toISOString().slice(0,10)
+      });
+    }
+    this.reset();
+    atualizarBalanco();
+  };
+
+  // Atualizar Balanço
+  function atualizarBalanco() {
+    const mesSelecionado = document.getElementById('mesSelect').value; // yyyy-mm
+    // Filtrar entradas e saidas do mês
+    const entradasMes = entradas.filter(e => e.data.slice(0,7) === mesSelecionado);
+    const saidasMes = saidas.filter(s => s.data.slice(0,7) === mesSelecionado);
+    let html = "";
+
+    // Lista de entradas
+    html += "<b>Entradas:</b> <table class='tableMini'>";
+    let totalE = 0;
+    for(let e of entradasMes){
+      html += `<tr><td>${e.categoria}</td><td>${formatarData(e.data)}</td><td>R$ ${e.valor.toFixed(2)}</td></tr>`;
+      totalE += e.valor;
+    }
+    html += `</table>Total: <b>R$ ${totalE.toFixed(2)}</b>`;
+
+    // Lista de saídas
+    html += "<br><b>Saídas:</b> <table class='tableMini'>";
+    let totalS = 0;
+    for(let s of saidasMes){
+      html += `<tr><td>${s.categoria}/${s.descricao}</td><td>${formatarData(s.data)}</td><td>R$ ${s.valor.toFixed(2)}</td></tr>`;
+      totalS += s.valor;
+    }
+    html += `</table>Total: <b>R$ ${totalS.toFixed(2)}</b>`;
+
+    // Saldo
+    const saldo = totalE - totalS;
+    html += `<br><br><b>SALDO DO MÊS:</b> <span class="${saldo<0?"negativo":"positivo"}">R$ ${saldo.toFixed(2)}</span>`;
+
+    document.getElementById('balanco').innerHTML = html;
+  }
+  function formatarData(dataStr) {
+    const [y, m, d] = dataStr.split("-");
+    return d+"/"+m;
+  }
+  document.getElementById('mesSelect').oninput = atualizarBalanco;
+  // Chamar no início
+  atualizarBalanco();
+</script>
+
+</body>
+</html>
